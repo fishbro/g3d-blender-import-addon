@@ -147,6 +147,20 @@ class SceneParser {
       entity.scale = entity.componentData["Size"];
     }
 
+    // Вытягиваем физическую длину из EMBED_RESIZEROTATE
+    // Длина — это 6-й элемент (индекс 5)
+    if (entity.componentData["EMBED_RESIZEROTATE"] && entity.componentData["EMBED_RESIZEROTATE"].length >= 6) {
+      entity.scaleEmbed = entity.componentData["EMBED_RESIZEROTATE"][5] / 100;
+    }
+    // На случай, если RESIZEROTATE нет, но есть обычный EMBED_RESIZE
+    else if (entity.componentData["EMBED_RESIZE"] && entity.componentData["EMBED_RESIZE"].length >= 8) {
+      // В обычном RESIZE индекс может отличаться, но часто это тоже 8-й или 13-й флоат
+      // В вашем дампе для PART_LOG в EMBED_RESIZE значение 19.99 стоит на 13-й позиции (индекс 12)
+      if (entity.componentData["EMBED_RESIZE"][12]) {
+        entity.scaleEmbed = entity.componentData["EMBED_RESIZE"][12] / 100;
+      }
+    }
+
     // Сохраняем сырые данные всех компонентов (в виде плоских массивов)
     entity.rawComponents = entity.componentData;
     delete entity.componentData;
