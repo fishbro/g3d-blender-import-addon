@@ -111,18 +111,35 @@ class SceneParser {
   finalizeEntity(entity) {
     const tFloats = entity.componentData["Transform"] || [];
 
+    // Константа масштаба (1 к 10)
+    const SCALE_FACTOR = 10.0;
+
     if (tFloats.length >= 13) {
-      entity.localPosition = { x: tFloats[10], y: tFloats[11], z: tFloats[12] };
+      // Вернули Y и Z, убрали минус (теперь Y-up корректный)
+      // И делим на 10 для масштаба
+      entity.localPosition = {
+        x: tFloats[10] / SCALE_FACTOR,
+        y: tFloats[12] / SCALE_FACTOR,
+        z: tFloats[11] / SCALE_FACTOR
+      };
     }
+
     if (tFloats.length >= 22) {
+      // Свапаем матрицу поворота под новые оси (меняем Y и Z)
       entity.rotationMatrix = [
-        [tFloats[13], tFloats[14], tFloats[15]],
-        [tFloats[16], tFloats[17], tFloats[18]],
-        [tFloats[19], tFloats[20], tFloats[21]],
+        [tFloats[13], tFloats[15], tFloats[14]], // 1-я строка (поменяли 2 и 3 колонки)
+        [tFloats[19], tFloats[21], tFloats[20]], // 2-я строка (это бывшая 3-я строка, колонки 2 и 3 поменяны)
+        [tFloats[16], tFloats[18], tFloats[17]], // 3-я строка (это бывшая 2-я строка, колонки 2 и 3 поменяны)
       ];
     }
+
     if (tFloats.length >= 25) {
-      entity.worldPosition = { x: tFloats[22], y: tFloats[23], z: tFloats[24] };
+      // Аналогично для мировых координат
+      entity.worldPosition = {
+        x: tFloats[22] / SCALE_FACTOR,
+        y: tFloats[24] / SCALE_FACTOR,
+        z: tFloats[23] / SCALE_FACTOR
+      };
     }
 
     // Достаем Scale как отдельное поле
