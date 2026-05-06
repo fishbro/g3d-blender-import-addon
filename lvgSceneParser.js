@@ -2,7 +2,7 @@ class SceneParser {
   constructor(hexString) {
     const cleanHex = hexString.replace(/\s+/g, "");
     const bytes = new Uint8Array(
-      cleanHex.match(/[\da-f]{2}/gi).map((h) => parseInt(h, 16)),
+        cleanHex.match(/[\da-f]{2}/gi).map((h) => parseInt(h, 16))
     );
     this.buffer = bytes.buffer;
     this.view = new DataView(this.buffer);
@@ -18,19 +18,17 @@ class SceneParser {
     const strings = [];
     for (let j = 0; j < this.buffer.byteLength; j++) {
       if (this.view.getUint8(j) === 0x0a) {
-        // Ищем символ переноса (\n)
         let start = j - 1;
         while (start >= 0) {
           const b = this.view.getUint8(start);
-          if (b >= 0x20 && b <= 0x7e)
-            start--; // Читаемые ASCII
+          if (b >= 0x20 && b <= 0x7e) start--;
           else break;
         }
         start++;
 
         if (j - start >= 4) {
           let rawStr = String.fromCharCode(
-            ...new Uint8Array(this.buffer, start, j - start),
+              ...new Uint8Array(this.buffer, start, j - start)
           );
           let cleanStr = this.cleanString(rawStr);
           if (cleanStr) {
@@ -46,29 +44,29 @@ class SceneParser {
     let i = 0;
 
     while (i < this.buffer.byteLength) {
-      // Проверяем, не наткнулись ли мы на строку (с учетом возможных смещений)
       const nextStr = strings.find((s) => s.start >= i && s.start < i + 4);
 
       if (nextStr) {
         const str = nextStr.str;
 
         if (str.startsWith("PART_")) {
+          // Если мы закончили читать предыдущий объект — финализируем его
           if (currentEntity) {
-            currentEntity.transforms = this.groupFloats(floatBuffer);
+            this.finalizeEntity(currentEntity, floatBuffer);
             result.entities.push(currentEntity);
           }
-          currentEntity = { type: str, components: [], transforms: [] };
-          floatBuffer = []; // Сброс для нового объекта
+          currentEntity = { type: str, components: [] };
+          floatBuffer = []; // Сброс буфера координат для нового объекта
         } else if (
-          str.startsWith("EMBED_") ||
-          ["Size", "explode", "default"].includes(str)
+            str.startsWith("EMBED_") ||
+            ["Size", "explode", "default"].includes(str)
         ) {
           if (currentEntity && !currentEntity.components.includes(str)) {
             currentEntity.components.push(str);
           }
         } else {
-          // Файлы ассетов или метаданные
-          if (currentEntity && (str.includes(".g3d") || str.includes(".G3D"))) {
+          // Файлы ассетов (модели, звуки) или метаданные
+          if (currentEntity && (str.includes(".g3d") || str.includes(".G3D") || str.includes(".wma"))) {
             if (!currentEntity.components.includes(str))
               currentEntity.components.push(str);
           } else if (!result.metadata.includes(str)) {
@@ -76,7 +74,7 @@ class SceneParser {
           }
         }
 
-        i = nextStr.end + 1; // Прыгаем в конец строки (за пределы 0x0A)
+        i = nextStr.end + 1; // Прыгаем в конец строки
         continue;
       }
 
@@ -87,29 +85,62 @@ class SceneParser {
         if (this.isValidFloat(floatVal)) {
           floatBuffer.push(parseFloat(floatVal.toFixed(4)));
         }
-        // ВАЖНО: всегда шагаем по 4 байта, чтобы не сбить выравнивание блоков!
+        // Шагаем строго по 4 байта
         i += 4;
       } else {
         i++;
       }
     }
 
-    // Сохраняем последний объект
+    // Сохраняем самый последний объект файла
     if (currentEntity) {
-      currentEntity.transforms = this.groupFloats(floatBuffer);
+      this.finalizeEntity(currentEntity, floatBuffer);
       result.entities.push(currentEntity);
     }
 
     return JSON.stringify(result, null, 2);
   }
 
-  // Жесткий фильтр для мусорных префиксов вроде "L>Shapes" или "Qt>Size"
+  // --- МАГИЯ СТРУКТУРИРОВАНИЯ ---
+  finalizeEntity(entity, floats) {
+    // 1. Извлекаем локальную позицию (индексы 10, 11, 12)
+    if (floats.length >= 13) {
+      entity.localPosition = {
+        x: floats[10],
+        y: floats[11],
+        z: floats[12],
+      };
+    }
+
+    // 2. Извлекаем 3x3 Матрицу вращения (индексы 13 - 21)
+    if (floats.length >= 22) {
+      entity.rotationMatrix = [
+        [floats[13], floats[14], floats[15]],
+        [floats[16], floats[17], floats[18]],
+        [floats[19], floats[20], floats[21]],
+      ];
+    }
+
+    // 3. Извлекаем мировую позицию (индексы 22, 23, 24)
+    if (floats.length >= 25) {
+      entity.worldPosition = {
+        x: floats[22],
+        y: floats[23],
+        z: floats[24],
+      };
+    }
+
+    // Сохраняем все остальные извлеченные числа в сыром виде,
+    // чтобы не потерять настройки компонентов (Size, Embeds)
+    entity.rawTransforms = this.groupFloats(floats);
+  }
+
   cleanString(str) {
-    // Проверяем известные игровые паттерны
     const componentMatch = str.match(/(PART_[A-Z_]+|EMBED_[A-Z_]+)/);
     if (componentMatch) return componentMatch[0];
 
-    const pathMatch = str.match(/[a-zA-Z0-9_\\]+\.[gG]3[dD]/);
+    // Добавлена поддержка .wma для аудио-ассетов
+    const pathMatch = str.match(/[a-zA-Z0-9_\\]+\.([gG]3[dD]|wma)/);
     if (pathMatch) return pathMatch[0];
 
     const keywords = [
@@ -123,18 +154,14 @@ class SceneParser {
       if (str.includes(kw)) return kw;
     }
 
-    // Если это неизвестная строка, вырезаем мусор в начале до первого нормального слова
     const clean = str.replace(/^.*?([A-Za-z][a-z]+|[a-z]{4,})/, "$1");
     return clean.length >= 4 ? clean : null;
   }
 
   isValidFloat(val) {
     if (Number.isNaN(val) || !Number.isFinite(val)) return false;
-    // 0, 1 и -1 обычно являются частями матриц поворота/масштаба
     if (val === 0 || val === 1 || val === -1) return true;
-
     const absVal = Math.abs(val);
-    // Фильтруем системные Int32 байты (они превратятся в числа вроде 1.4e-45)
     return absVal > 0.001 && absVal < 10000;
   }
 
@@ -143,7 +170,6 @@ class SceneParser {
     for (let i = 0; i < floats.length; i += 3) {
       const vec = floats.slice(i, i + 3);
       if (vec.length === 3) {
-        // Исключаем пустые векторы [0, 0, 0], чтобы оставить только реальные координаты смещения
         if (vec[0] !== 0 || vec[1] !== 0 || vec[2] !== 0) {
           grouped.push(vec);
         }
@@ -154,6 +180,6 @@ class SceneParser {
 }
 
 // Запуск парсера
-const hexData = `936E5244 0000803F...`; // <--- Сюда снова вставить дамп
+const hexData = `936E5244 0000803F...`; // Вставляй свой дамп сюда
 const parser = new SceneParser(hexData);
 console.log(parser.parse());
