@@ -144,7 +144,7 @@ class SceneParser {
 
     // Достаем Scale как отдельное поле
     if (entity.componentData["Size"] && entity.componentData["Size"].length > 0) {
-      entity.scale = entity.componentData["Size"][0];
+      entity.scale = entity.componentData["Size"];
     }
 
     // Сохраняем сырые данные всех компонентов (в виде плоских массивов)
